@@ -7,7 +7,8 @@ current-value snapshot, and a pub/sub feed.
 ![Architecture: AVEVA PI Web API → integration service → Redis](docs/architecture.png)
 
 > 📊 A customer-facing slide deck (with speaker notes) is in
-> [`demo/AVEVA-PI-Redis-Demo.pptx`](demo/AVEVA-PI-Redis-Demo.pptx).
+> [`demo/AVEVA-PI-Redis-Demo.pptx`](demo/AVEVA-PI-Redis-Demo.pptx), and a day-of
+> demo runbook is in [`demo/RUNBOOK.md`](demo/RUNBOOK.md).
 
 **Delivery model:** each cycle batch-reads *recorded* (archived) values for all
 tags in **one** streamset request, starting from each tag's **checkpoint** stored
