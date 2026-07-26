@@ -1,158 +1,232 @@
-# AVEVA PI Web API → Redis Integration (POC)
+# AVEVA PI Web API to Redis Integration Demo
 
-A small async service that polls the **AVEVA PI Web API** for time-series tag
-values and streams them into **Redis** — as RedisTimeSeries history, a
-current-value snapshot, and a pub/sub feed.
+A customer-facing proof of concept that reads recorded values from the **AVEVA PI Web API**, writes them into **Redis TimeSeries**, and serves the resulting operational data through a purpose-built web application.
 
-![Architecture: AVEVA PI Web API → integration service → Redis](docs/architecture.png)
+The browser demo replaces RedisInsight and terminal-driven querying. It lets customers explore live values, raw history, query-time aggregations, value filters, label-based multi-series queries, cross-series grouping, automatic rollups and Redis Pub/Sub from one interface.
 
-> 📊 A customer-facing slide deck (with speaker notes) is in
-> [`demo/AVEVA-PI-Redis-Demo.pptx`](demo/AVEVA-PI-Redis-Demo.pptx), and a day-of
-> demo runbook is in [`demo/RUNBOOK.md`](demo/RUNBOOK.md).
+## Architecture
 
-**Delivery model:** each cycle batch-reads *recorded* (archived) values for all
-tags in **one** streamset request, starting from each tag's **checkpoint** stored
-in Redis. On restart it resumes from the checkpoint and backfills the gap — no
-data loss, no duplicates (`TS.ADD ON_DUPLICATE LAST`).
+```text
+AVEVA PI / mock PI Web API
+          |
+          | batch recorded values
+          v
+Async integration service
+  - per-tag checkpoints
+  - gap recovery
+  - duplicate-safe writes
+          |
+          v
+Redis
+  - TimeSeries: compressed history
+  - Hashes: latest state
+  - Pub/Sub: live updates
+  - TS.CREATERULE: 1-minute rollups
+          |
+          v
+Customer web application (http://localhost:3000)
+```
 
-## What lands in Redis
+AVEVA PI remains the long-term system of record. Redis acts as the low-latency serving and real-time layer for applications, dashboards, alerting and AI use cases.
 
-For a tag like `Sinusoid`:
+## What the web application demonstrates
 
-| Key / channel        | Type          | Purpose                                  |
-|----------------------|---------------|------------------------------------------|
-| `pi:ts:Sinusoid`     | TimeSeries    | Full history; labels `source=pi tag=… path=…` |
-| `pi:latest:Sinusoid` | Hash          | Latest value, timestamp, quality, units  |
-| `pi:checkpoint:Sinusoid` | String    | Last-written sample time (epoch ms) for gap recovery |
-| `pi:updates`         | Pub/Sub       | JSON per new sample for live consumers    |
+### Current operational state
 
-## Quick start (Docker — no PI System needed)
+The landing page uses a label query to retrieve the latest value across all PI series:
 
-Spins up Redis Stack, a **mock PI Web API**, and the integration service:
+```text
+TS.MGET WITHLABELS FILTER source=pi kind=raw
+```
+
+### Flexible single-series reads
+
+Customers can select a PI tag, time range, bucket size and aggregation. The application generates commands such as:
+
+```text
+TS.RANGE pi:ts:PlantA_Generator01_Temperature <from> <to>
+  COUNT 1000
+  AGGREGATION avg 60000
+```
+
+Available read-time aggregations include average, minimum, maximum, sum, range, count, first, last and standard deviation.
+
+The UI can also exclude out-of-range sensor readings before aggregation:
+
+```text
+TS.RANGE pi:ts:PlantA_Generator01_Temperature <from> <to>
+  FILTER_BY_VALUE 0 100
+  COUNT 1000
+  AGGREGATION avg 60000
+```
+
+### Multi-series filtering, grouping and reduction
+
+The fleet view uses labels such as `site`, `asset` and `metric` to query many series without knowing their key names:
+
+```text
+TS.MRANGE <from> <to>
+  WITHLABELS
+  AGGREGATION avg 60000
+  FILTER source=pi kind=raw metric=temperature
+  GROUPBY site REDUCE avg
+```
+
+This can answer questions such as:
+
+- Average generator temperature by site
+- Total power by site
+- Maximum vibration by asset
+
+### Automatic downsampling
+
+Each raw series has an automatically maintained one-minute average rollup:
+
+```text
+TS.CREATERULE <raw-series> <rollup-series> AGGREGATION avg 60000
+```
+
+The web application compares the raw and rollup sample counts and shows how a dashboard can query the smaller, pre-computed series for longer time windows.
+
+### Live updates
+
+Every newly ingested sample is published on:
+
+```text
+pi:updates
+```
+
+The dashboard subscribes through a server-sent event endpoint and updates live without polling Redis from the browser.
+
+## Data model
+
+For a PI tag named `PlantA_Generator01_Temperature`:
+
+| Redis object | Type | Purpose |
+|---|---|---|
+| `pi:ts:PlantA_Generator01_Temperature` | TimeSeries | Compressed raw history |
+| `pi:ts:PlantA_Generator01_Temperature:avg_1m` | TimeSeries | Automatic one-minute rollup |
+| `pi:latest:PlantA_Generator01_Temperature` | Hash | Latest value, quality, units and metadata |
+| `pi:checkpoint:PlantA_Generator01_Temperature` | String | Last ingested timestamp for gap recovery |
+| `pi:updates` | Pub/Sub | Live update notifications |
+
+Raw and rollup time series are labelled with:
+
+```text
+source=pi
+kind=raw | rollup
+tag=<PI tag>
+site=<site>
+asset=<asset>
+metric=<metric>
+path=<PI point path>
+```
+
+For the local demo, labels are derived from the `Site_Asset_Metric` tag naming convention. In a real deployment, this metadata would normally come from PI Asset Framework or an enterprise metadata mapping.
+
+## Quick start
+
+### Prerequisites
+
+- Docker Desktop
+- Git
+
+### Start the full demo
 
 ```bash
+git clone https://github.com/amitmknit/aveva-pi-redis-integration.git
+cd aveva-pi-redis-integration
 docker compose up --build
 ```
 
-Then inspect the data:
+Open:
 
-```bash
-# latest snapshot for a tag
-docker compose exec redis redis-cli HGETALL pi:latest:Sinusoid
-
-# last 5 samples of history
-docker compose exec redis redis-cli TS.RANGE pi:ts:Sinusoid - + COUNT 5
-
-# all PI series at once, by label
-docker compose exec redis redis-cli TS.MRANGE - + FILTER source=pi
-
-# downsampled rollup (auto-maintained 1-min avg via TS.CREATERULE)
-docker compose exec redis redis-cli TS.RANGE pi:ts:Sinusoid:avg_1m - + COUNT 5
-docker compose exec redis redis-cli TS.MRANGE - + FILTER rollup=avg_1m
-
-# watch the live feed
-docker compose exec redis redis-cli SUBSCRIBE pi:updates
+```text
+http://localhost:3000
 ```
 
-Check health + metrics:
+The stack starts:
+
+| Service | Port | Purpose |
+|---|---:|---|
+| Redis Stack Server | 6379 | Redis with TimeSeries support |
+| Mock PI Web API | 8080 | Reproducible local historian data |
+| Integration health and metrics | 9100 | `/healthz` and `/metrics` |
+| Customer web application | 3000 | Demo dashboard and query explorer |
+
+### Stop the demo
 
 ```bash
-curl http://localhost:9100/healthz    # {"status":"ok"} / 503 while degraded
-curl http://localhost:9100/metrics    # Prometheus: samples_written, poll_errors, pi_up, ...
+docker compose down
 ```
 
-**See the commands live during a demo.** Run a profiler in a spare terminal so the
-audience watches every command the service issues, in real time:
+To remove the Redis data as well:
 
 ```bash
-docker compose exec redis redis-cli MONITOR
+docker compose down -v
 ```
 
-RedisInsight UI (browse the TimeSeries visually + built-in **Profiler**, which is
-`MONITOR` in the UI): http://localhost:8001
+## Gap-recovery demonstration
 
-## Run locally without Docker
+Stop only the integration service while leaving the PI mock and Redis running:
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env
-
-# terminal 1 — mock PI Web API
-uvicorn src.mock_pi_server:app --port 8080
-
-# terminal 2 — Redis Stack (needs RedisTimeSeries)
-docker run -p 6379:6379 redis/redis-stack-server:7.4.0-v0
-
-# terminal 3 — the integration service
-cd src && python main.py
+docker compose stop integration
 ```
 
-## Point at a real PI Web API
+Wait 20 to 30 seconds, then restart it:
 
-Edit `.env`:
+```bash
+docker compose start integration
+docker compose logs -f integration
+```
+
+The service resumes from each tag's checkpoint, backfills the missing recorded values and uses `TS.ADD ... ON_DUPLICATE LAST` to avoid duplicate data.
+
+## Point the POC at a real PI Web API
+
+Update the environment values in `docker-compose.yml` or use `.env` when running locally:
 
 ```ini
 PI_BASE_URL=https://your-pi-server/piwebapi
-PI_AUTH_MODE=basic          # or wire up Kerberos in pi_client.py
+PI_AUTH_MODE=basic
 PI_USERNAME=svc_pi
-PI_PASSWORD=•••••
+PI_PASSWORD=your-password
 PI_VERIFY_SSL=true
-PI_POINTS=\\PISRV01\Sinusoid,\\PISRV01\CDT158
+PI_POINTS=\\PISRV01\Tag1,\\PISRV01\Tag2
 ```
 
-The client uses the standard PI Web API endpoints (`/points`, `/streams/{webId}/value`),
-so no code changes are needed for the happy path. Production auth for PI is
-usually **Kerberos/SPNEGO**; add it in `PIWebAPIClient.__init__` when you move
-past the POC.
+The POC currently supports no authentication or Basic authentication. Production PI environments commonly use Kerberos/SPNEGO, which should be added before a production deployment.
 
-## Layout
+## Why Redis TimeSeries
 
-| File                    | Role                                             |
-|-------------------------|--------------------------------------------------|
-| `src/config.py`         | Env/.env settings                                |
-| `src/pi_client.py`      | Async PI Web API client (`resolve_point`, `get_current_value`) |
-| `src/redis_writer.py`   | RedisTimeSeries + snapshot + pub/sub writer      |
-| `src/main.py`           | Poll loop + graceful shutdown                    |
-| `src/mock_pi_server.py` | Fake PI Web API for local testing                |
+- **Fast application reads:** dashboards and APIs query Redis instead of repeatedly loading the PI historian.
+- **Compressed time-series chunks:** the series are created with `ENCODING COMPRESSED` to reduce memory use for typical telemetry.
+- **Native query-time aggregation:** applications receive dashboard-ready buckets instead of transferring every raw sample.
+- **Secondary indexes through labels:** `TS.MGET`, `TS.MRANGE` and `TS.QUERYINDEX` find series by business metadata.
+- **Cross-series analytics:** `GROUPBY` and `REDUCE` aggregate matching assets inside Redis.
+- **Automatic rollups:** `TS.CREATERULE` maintains summary series as new samples arrive.
+- **Real-time delivery:** Pub/Sub notifies the application of new values immediately.
+- **Protection for OT systems:** application traffic scales independently from the historian.
 
-## Why Redis in front of AVEVA PI
+## Repository layout
 
-Redis **complements** PI — it does not replace it. PI stays the system of record
-and the long-term compressed historian; Redis becomes the low-latency **serving
-and real-time layer** that applications talk to instead of hitting the historian
-directly. For serving operational data to modern apps, that changes a lot:
+| Path | Role |
+|---|---|
+| `src/main.py` | Checkpoint-based ingestion loop |
+| `src/pi_client.py` | PI Web API client |
+| `src/redis_writer.py` | TimeSeries, snapshot, rollup and Pub/Sub writes |
+| `src/mock_pi_server.py` | Local PI Web API simulator |
+| `src/dashboard.py` | Read-only customer web API and SSE bridge |
+| `src/web/` | HTML, CSS and JavaScript dashboard |
+| `demo/RUNBOOK.md` | Customer-demo talk track |
 
-| Dimension | Querying PI Web API directly | Serving via Redis |
-|-----------|------------------------------|-------------------|
-| **Read latency** | Per-request REST call | **Sub-millisecond**, in-memory |
-| **Concurrent app clients** | Limited — load lands on PI | **Thousands**, scaled via replicas |
-| **Real-time delivery** | Poll / channel subscriptions | Native **Pub/Sub & Streams** push |
-| **Data models** | Time-series (OT-specific) | **TimeSeries + JSON + Search + Vector** |
-| **Load on OT systems** | Every query taxes the historian | Apps hit Redis; **PI stays protected** |
-| **Scaling & deployment** | Vertical; OT-licensed | **Horizontal**, cloud-native, managed |
+## POC to production considerations
 
-**Net:** point your dashboards, alerting and ML feature lookups at Redis. They get
-speed and real-time push; your historian and PI licensing are shielded from app
-traffic; and the same store also does caching, JSON enrichment and vector search —
-so there's less infrastructure to run overall.
-
-## Implemented
-
-- **Recorded-value backfill** — reads archived values (`/streamsets/recorded`),
-  not just the current value, so no samples between polls are missed.
-- **Streamset batching** — all tags read in one request per cycle.
-- **Checkpoints + gap recovery** — per-tag last-seen timestamp in Redis; restarts
-  resume from the checkpoint and backfill the gap. Deduped via `TS.ADD ON_DUPLICATE LAST`.
-- **Observability** — `/healthz` and Prometheus `/metrics` (samples written, poll
-  errors, `pi_up`, resolved-point count).
-- **Downsampling** — per tag, a `TS.CREATERULE` compaction auto-maintains a rollup
-  series (`pi:ts:<tag>:avg_1m` by default) for cheap long-range queries. Configurable
-  bucket + aggregation via `DOWNSAMPLE_*`.
-
-## Still POC → production
-
-- **Auth:** Kerberos/SPNEGO for a real PI Web API (add to `PIWebAPIClient.__init__`);
-  ACL/TLS + `requirepass` for Redis.
-- **Scale:** shard tags across workers; tune `RECORDED_MAX_COUNT` and poll interval.
-- **Alerting:** wire `/metrics` into Prometheus + Alertmanager (stale `pi_last_poll_unixtime`, rising `pi_poll_errors_total`).
+- Add Kerberos/SPNEGO for PI Web API authentication.
+- Enable Redis TLS, ACLs and secrets management.
+- Source labels from PI Asset Framework or governed enterprise metadata.
+- Add user authentication and authorisation to the dashboard.
+- Partition tags across workers for higher ingestion scale.
+- Add structured logs, tracing and production monitoring.
+- Validate retention, rollup and memory sizing against the customer's actual tag count and sampling frequency.

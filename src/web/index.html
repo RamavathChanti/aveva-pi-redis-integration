@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AVEVA PI + Redis TimeSeries Demo</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark">R</div>
+      <div>
+        <div class="brand-title">AVEVA PI + Redis</div>
+        <div class="brand-subtitle">Real-time operational data demo</div>
+      </div>
+    </div>
+    <div id="connectionPill" class="status-pill status-pending">
+      <span class="status-dot"></span>
+      <span id="connectionText">Connecting to Redis</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero panel">
+      <div class="hero-copy">
+        <div class="eyebrow">CUSTOMER DEMONSTRATION</div>
+        <h1>Turn PI historian data into a fast, application-ready operational layer</h1>
+        <p>
+          AVEVA PI remains the system of record. Redis provides live state, compressed
+          time-series history, automatic rollups, label-based fleet queries and real-time delivery.
+        </p>
+      </div>
+      <div class="architecture" aria-label="Architecture flow">
+        <div class="arch-node">
+          <span class="arch-kicker">SYSTEM OF RECORD</span>
+          <strong>AVEVA PI</strong>
+          <small>Recorded tag values</small>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node">
+          <span class="arch-kicker">INTEGRATION</span>
+          <strong>PI Web API</strong>
+          <small>Batch + checkpoint</small>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node active">
+          <span class="arch-kicker">REAL-TIME LAYER</span>
+          <strong>Redis</strong>
+          <small>TimeSeries + Hash + Pub/Sub</small>
+        </div>
+        <div class="arch-arrow">→</div>
+        <div class="arch-node">
+          <span class="arch-kicker">CONSUMERS</span>
+          <strong>Applications</strong>
+          <small>Dashboards, alerts and AI</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="section-heading">
+      <div>
+        <span class="eyebrow">LIVE OPERATIONS</span>
+        <h2>Current PI values served from Redis</h2>
+      </div>
+      <div class="query-chip"><code>TS.MGET</code> latest values by labels</div>
+    </section>
+    <section id="latestCards" class="metric-grid" aria-live="polite">
+      <div class="loading-card">Waiting for PI samples...</div>
+    </section>
+
+    <section class="panel query-lab">
+      <div class="section-heading compact">
+        <div>
+          <span class="eyebrow">QUERY LAB</span>
+          <h2>Explore one time series</h2>
+          <p>Change the controls to see Redis filter and aggregate the data at read time.</p>
+        </div>
+      </div>
+
+      <div class="controls-grid">
+        <label>
+          PI tag
+          <select id="tagSelect"></select>
+        </label>
+        <label>
+          Time window
+          <select id="windowSelect">
+            <option value="5">Last 5 minutes</option>
+            <option value="15" selected>Last 15 minutes</option>
+            <option value="60">Last hour</option>
+            <option value="360">Last 6 hours</option>
+            <option value="1440">Last 24 hours</option>
+          </select>
+        </label>
+        <label>
+          Read mode
+          <select id="aggregationSelect">
+            <option value="raw">Raw samples</option>
+            <option value="avg" selected>Average</option>
+            <option value="min">Minimum</option>
+            <option value="max">Maximum</option>
+            <option value="sum">Sum</option>
+            <option value="range">Range (max - min)</option>
+            <option value="count">Sample count</option>
+            <option value="first">First value</option>
+            <option value="last">Last value</option>
+            <option value="std.p">Standard deviation</option>
+          </select>
+        </label>
+        <label>
+          Bucket size
+          <select id="bucketSelect">
+            <option value="10000">10 seconds</option>
+            <option value="30000">30 seconds</option>
+            <option value="60000" selected>1 minute</option>
+            <option value="300000">5 minutes</option>
+            <option value="900000">15 minutes</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="filter-row">
+        <label class="check-label">
+          <input id="valueFilterEnabled" type="checkbox">
+          Filter readings by accepted value range
+        </label>
+        <label>
+          Minimum
+          <input id="minValue" type="number" step="0.1" value="0" disabled>
+        </label>
+        <label>
+          Maximum
+          <input id="maxValue" type="number" step="0.1" value="1000" disabled>
+        </label>
+        <button id="runQueryButton" class="primary-button" type="button">Run query</button>
+      </div>
+
+      <div id="seriesStats" class="stats-row"></div>
+      <div class="chart-wrap">
+        <canvas id="seriesChart" aria-label="Selected time series chart"></canvas>
+      </div>
+      <div class="command-card">
+        <div class="command-header">
+          <span>Redis command used by the application</span>
+          <span id="seriesLatency" class="latency"></span>
+        </div>
+        <code id="seriesCommand">Waiting for data...</code>
+        <p id="seriesExplanation"></p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading compact">
+        <div>
+          <span class="eyebrow">MULTI-SERIES ANALYTICS</span>
+          <h2>Filter, group and reduce across the fleet</h2>
+          <p>One TS.MRANGE query selects multiple PI tags by labels and performs cross-series aggregation.</p>
+        </div>
+      </div>
+      <div class="controls-grid three">
+        <label>
+          Metric label
+          <select id="fleetMetricSelect"></select>
+        </label>
+        <label>
+          Group by
+          <select id="groupBySelect">
+            <option value="site" selected>Site</option>
+            <option value="asset">Asset</option>
+          </select>
+        </label>
+        <label>
+          Reduce matching series with
+          <select id="reducerSelect">
+            <option value="avg" selected>Average</option>
+            <option value="sum">Sum</option>
+            <option value="min">Minimum</option>
+            <option value="max">Maximum</option>
+            <option value="range">Range</option>
+          </select>
+        </label>
+      </div>
+      <div id="fleetLegend" class="legend"></div>
+      <div class="chart-wrap">
+        <canvas id="fleetChart" aria-label="Grouped fleet time series chart"></canvas>
+      </div>
+      <div class="command-card">
+        <div class="command-header">
+          <span>Redis command used by the application</span>
+          <span id="fleetLatency" class="latency"></span>
+        </div>
+        <code id="fleetCommand">Waiting for data...</code>
+        <p id="fleetExplanation"></p>
+      </div>
+    </section>
+
+    <section class="panel rollup-panel">
+      <div class="section-heading compact">
+        <div>
+          <span class="eyebrow">AUTOMATIC DOWNSAMPLING</span>
+          <h2>Raw detail plus efficient long-range rollups</h2>
+          <p>TS.CREATERULE continuously maintains a one-minute average series without application jobs.</p>
+        </div>
+      </div>
+      <div class="rollup-layout">
+        <div class="rollup-metrics">
+          <div class="rollup-card">
+            <span>Raw series</span>
+            <strong id="rawSamples">—</strong>
+            <small id="rawMemory">—</small>
+          </div>
+          <div class="rollup-arrow">→</div>
+          <div class="rollup-card accent">
+            <span>1-minute rollup</span>
+            <strong id="rollupSamples">—</strong>
+            <small id="rollupMemory">—</small>
+          </div>
+        </div>
+        <div class="chart-wrap small">
+          <canvas id="rollupChart" aria-label="Automatic rollup chart"></canvas>
+        </div>
+      </div>
+      <div class="command-card split-command">
+        <div>
+          <div class="command-header"><span>Rule created once</span></div>
+          <code id="rollupRule">Waiting for data...</code>
+        </div>
+        <div>
+          <div class="command-header"><span>Dashboard read</span></div>
+          <code id="rollupCommand">Waiting for data...</code>
+        </div>
+        <p id="rollupExplanation"></p>
+      </div>
+    </section>
+
+    <section class="two-column">
+      <section class="panel">
+        <div class="section-heading compact">
+          <div>
+            <span class="eyebrow">LIVE DELIVERY</span>
+            <h2>Recent PI updates</h2>
+            <p>Redis Pub/Sub wakes the web application as each new sample arrives.</p>
+          </div>
+          <div id="liveIndicator" class="live-indicator"><span></span> Live</div>
+        </div>
+        <div class="event-table-wrap">
+          <table class="event-table">
+            <thead>
+              <tr><th>Time</th><th>Tag</th><th>Value</th><th>Quality</th></tr>
+            </thead>
+            <tbody id="eventsBody">
+              <tr><td colspan="4" class="empty-cell">Waiting for live updates...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel benefits-panel">
+        <div class="section-heading compact">
+          <div>
+            <span class="eyebrow">WHY REDIS TIMESERIES</span>
+            <h2>Built for operational applications</h2>
+          </div>
+        </div>
+        <div class="benefit-list">
+          <article>
+            <span class="benefit-number">01</span>
+            <div><strong>Low-latency reads</strong><p>Applications read live and historical values from an in-memory serving layer instead of repeatedly loading the PI historian.</p></div>
+          </article>
+          <article>
+            <span class="benefit-number">02</span>
+            <div><strong>Compressed storage</strong><p>Time-series samples use compressed chunks by default, reducing memory consumption and memory accesses for typical telemetry.</p></div>
+          </article>
+          <article>
+            <span class="benefit-number">03</span>
+            <div><strong>Query flexibility</strong><p>Range filters, value filters, on-demand aggregation, label queries, GROUPBY and reducers are available as native commands.</p></div>
+          </article>
+          <article>
+            <span class="benefit-number">04</span>
+            <div><strong>Automatic rollups</strong><p>Pre-computed minute, hour or day series accelerate long-range dashboards without separate cron jobs or ETL pipelines.</p></div>
+          </article>
+          <article>
+            <span class="benefit-number">05</span>
+            <div><strong>Protect the OT system</strong><p>Dashboards, alerting services and AI applications scale independently while PI remains the authoritative historian.</p></div>
+          </article>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <footer>
+    Demo architecture: AVEVA PI Web API → integration service → Redis TimeSeries → customer web application
+  </footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

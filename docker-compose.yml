@@ -1,9 +1,10 @@
 services:
   redis:
-    image: redis/redis-stack:7.4.0-v0   # includes RedisTimeSeries + RedisInsight UI
+    image: redis/redis-stack-server:7.4.0-v0
     ports:
       - "6379:6379"
-      - "8001:8001"                      # RedisInsight web UI
+    volumes:
+      - redis-data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -26,10 +27,10 @@ services:
     environment:
       PI_BASE_URL: http://mock-pi:8080/piwebapi
       PI_AUTH_MODE: none
-      PI_POINTS: '\\PISRV01\Sinusoid,\\PISRV01\CDT158,\\PISRV01\SINUSOIDU'
+      PI_POINTS: '\\PISRV01\PlantA_Generator01_Temperature,\\PISRV01\PlantA_Generator02_Temperature,\\PISRV01\PlantB_Generator03_Temperature,\\PISRV01\PlantA_Generator01_Power,\\PISRV01\PlantA_Generator02_Power,\\PISRV01\PlantB_Generator03_Power,\\PISRV01\PlantA_Generator01_Vibration,\\PISRV01\PlantB_Generator03_Vibration'
       POLL_INTERVAL_SECONDS: "5"
-      BACKFILL_START_MINUTES: "10"
-      RECORDED_MAX_COUNT: "1000"
+      BACKFILL_START_MINUTES: "60"
+      RECORDED_MAX_COUNT: "5000"
       HEALTH_PORT: "9100"
       REDIS_URL: redis://redis:6379/0
       REDIS_KEY_PREFIX: pi
@@ -38,5 +39,22 @@ services:
       DOWNSAMPLE_BUCKET_MS: "60000"
       DOWNSAMPLE_AGGREGATION: avg
     ports:
-      - "9100:9100"          # /healthz + /metrics
+      - "9100:9100"
     command: python main.py
+
+  dashboard:
+    build: .
+    depends_on:
+      redis:
+        condition: service_healthy
+      integration:
+        condition: service_started
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      REDIS_KEY_PREFIX: pi
+    ports:
+      - "3000:3000"
+    command: uvicorn dashboard:app --host 0.0.0.0 --port 3000
+
+volumes:
+  redis-data:

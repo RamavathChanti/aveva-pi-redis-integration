@@ -1,104 +1,124 @@
-# Demo Runbook — day-of, from a fresh laptop restart
+# Customer Demo Runbook: AVEVA PI + Redis Web Application
 
-Assumes Docker isn't running yet and nothing is up. Pre-flight is ~3 minutes.
+This version of the demo is designed to be presented entirely through the custom web application rather than RedisInsight or a sequence of terminal commands.
 
-## 1. Pre-flight (~10 min before)
+## 1. Pre-flight
 
-**Start Docker Desktop** — it does *not* auto-start after a reboot. Launch it from
-Spotlight/Applications and wait for the menu-bar whale icon to stop animating. Then:
+Start Docker Desktop and confirm it is ready:
 
 ```bash
 docker ps
 ```
 
-**Free port 6379** — a leftover `redis-demo` container can grab the port the demo's
-Redis needs. Remove it if present (harmless if it isn't):
+Go to the project directory:
 
 ```bash
-docker rm -f redis-demo
+cd ~/aveva-pi-redis-integration
 ```
 
-**Go to the project and pull the latest:**
+If port 6379 is already in use, stop the conflicting Redis container before continuing.
 
-```bash
-cd ~/Claude-Code/aveva-pi-redis-integration && git pull
-```
-
-## 2. Launch the stack (one command)
-
-Builds and starts Redis Stack + the mock PI Web API + the integration service:
+## 2. Start the stack
 
 ```bash
 docker compose up --build
 ```
 
-Leave this terminal visible — the audience sees `resolved 3/3 points` and
-`wrote N new sample(s)` scroll by. First run takes ~30–60s (image build).
+Wait until the integration logs show that all configured PI points are resolved and new samples are being written.
 
-## 3. Open RedisInsight
+Open the customer application:
 
-Browse to **http://localhost:8001**. If prompted, add a database at `localhost:6379`.
-Open a time-series key (`pi:ts:Sinusoid`) to show the live chart.
-
-## 4. Demo talk track (two more terminals)
-
-**Terminal A — live commands (the "wow" moment):** keep running the whole time so the
-audience watches every `TS.ADD`, `HSET`, `PUBLISH` as it happens:
-
-```bash
-docker compose exec redis redis-cli MONITOR
+```text
+http://localhost:3000
 ```
 
-**Terminal B — inspect the data:**
+The page should show a green Redis connection indicator and eight live PI measurements.
+
+## 3. Suggested customer talk track
+
+### A. Architecture and positioning
+
+Use the architecture panel at the top of the page:
+
+1. AVEVA PI remains the authoritative historian.
+2. The integration service reads recorded values in batches through PI Web API.
+3. Redis provides the low-latency operational layer.
+4. Dashboards, alerting and AI applications read Redis rather than adding load to PI.
+
+### B. Current operational state
+
+Point to the live cards.
+
+Explain that one `TS.MGET` label query retrieves the latest value across all matching PI time series. The application does not maintain a hard-coded list of Redis keys.
+
+### C. Single-series query flexibility
+
+In **Explore one time series**:
+
+1. Select a temperature tag.
+2. Set the time window to 15 minutes.
+3. Switch between raw samples, average, minimum and maximum.
+4. Change the bucket from 10 seconds to one minute or five minutes.
+5. Point out that the chart changes while the exact Redis command appears underneath.
+
+Enable **Filter readings by accepted value range** to demonstrate `FILTER_BY_VALUE`. Explain that filtering happens before aggregation.
+
+### D. Multi-series analytics
+
+In **Filter, group and reduce across the fleet**:
+
+1. Select `Temperature`.
+2. Group by `Site`.
+3. Use `Average` as the reducer.
+4. Change the reducer to `Maximum`.
+5. Select `Power` and use `Sum` to demonstrate total output by site.
+
+Explain that `TS.MRANGE` uses labels to select many series, then `GROUPBY` and `REDUCE` perform the cross-series calculation inside Redis.
+
+### E. Automatic rollups and compression
+
+Use the **Automatic downsampling** section:
+
+1. Compare the raw sample count with the one-minute rollup count.
+2. Show the `TS.CREATERULE` command.
+3. Explain that Redis maintains the rollup automatically as new samples arrive.
+4. Point out the compressed chunk type and memory values returned by `TS.INFO`.
+
+Avoid promising a fixed compression percentage for the customer's data. Compression depends on timestamp regularity, value patterns, chunk size and the number of samples per series.
+
+### F. Live delivery
+
+Point to the recent-update table. It is updated through Redis Pub/Sub and server-sent events.
+
+Explain that other consumers could independently subscribe for alerting, workflow automation or operational AI use cases.
+
+## 4. Gap-recovery finale
+
+Leave the web page open and stop only the integration service:
 
 ```bash
-docker compose exec redis redis-cli HGETALL pi:latest:Sinusoid
-```
-```bash
-docker compose exec redis redis-cli TS.RANGE pi:ts:Sinusoid - + COUNT 5
-```
-```bash
-docker compose exec redis redis-cli TS.MRANGE - + FILTER source=pi
+docker compose stop integration
 ```
 
-Auto-maintained downsampling rollup:
+Wait 20 to 30 seconds. The mock historian continues to generate recorded values while the integration is down.
+
+Restart it:
 
 ```bash
-docker compose exec redis redis-cli TS.RANGE pi:ts:Sinusoid:avg_1m - + COUNT 5
+docker compose start integration
+docker compose logs -f integration
 ```
 
-Health + metrics:
+Explain that the service resumes from each Redis checkpoint and backfills the gap. The live dashboard catches up without duplicate samples.
 
-```bash
-curl http://localhost:9100/healthz
-```
-```bash
-curl http://localhost:9100/metrics
-```
-
-**Gap-recovery finale** — in the `docker compose up` terminal press `Ctrl-C`, wait ~15s
-("the historian kept recording; our service was down"), then bring it back:
-
-```bash
-docker compose up
-```
-
-Point out in the logs that it resumes from the checkpoint and backfills the outage —
-zero data loss, zero duplicates.
-
-## 5. Teardown (after)
+## 5. Teardown
 
 ```bash
 docker compose down
 ```
 
----
+Use this for a completely clean reset:
 
-## Tips
-
-- **Do a full dry run this morning:** run steps 1–2, confirm data lands, then
-  `docker compose down`. The first `up --build` is the slowest; later launches are seconds.
-- **"port is already allocated"** on `docker compose up` → the 6379 conflict. Rerun
-  `docker rm -f redis-demo` and try again.
-- **Nothing in RedisInsight?** Confirm the integration container is running
-  (`docker compose ps`) and that you added the DB as `localhost:6379`.
+```bash
+docker compose down -v
+```
