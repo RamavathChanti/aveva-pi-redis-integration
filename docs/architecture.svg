@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="460" viewBox="0 0 1040 460" font-family="Helvetica, Arial, sans-serif">
+  <rect width="1040" height="460" fill="#F6F8F9"/>
+
+  <!-- Title -->
+  <text x="40" y="52" font-size="26" font-weight="bold" fill="#163341">AVEVA PI Web API</text>
+  <line x1="278" y1="44" x2="308" y2="44" stroke="#163341" stroke-width="3"/>
+  <polygon points="316,44 305,38 305,50" fill="#163341"/>
+  <text x="330" y="52" font-size="26" font-weight="bold" fill="#163341">Redis integration</text>
+  <text x="40" y="80" font-size="14" fill="#5C6B73">Batched backfill of PI tag values into RedisTimeSeries, snapshots and a live feed</text>
+
+  <!-- Box A: PI -->
+  <rect x="40" y="130" width="270" height="120" rx="14" fill="#163341"/>
+  <text x="175" y="180" font-size="19" font-weight="bold" fill="#FFFFFF" text-anchor="middle">AVEVA PI Web API</text>
+  <text x="175" y="207" font-size="13" fill="#B8C7CD" text-anchor="middle">Historian tags</text>
+  <text x="175" y="226" font-size="13" fill="#B8C7CD" text-anchor="middle">(real or mock server)</text>
+
+  <!-- Arrow A -> B -->
+  <line x1="310" y1="190" x2="376" y2="190" stroke="#5C6B73" stroke-width="2.5"/>
+  <polygon points="384,190 373,184 373,196" fill="#5C6B73"/>
+  <text x="346" y="220" font-size="11.5" font-style="italic" fill="#5C6B73" text-anchor="middle">streamset /</text>
+  <text x="346" y="234" font-size="11.5" font-style="italic" fill="#5C6B73" text-anchor="middle">recorded</text>
+
+  <!-- Box B: Service -->
+  <rect x="385" y="130" width="270" height="120" rx="14" fill="#091A23"/>
+  <text x="520" y="176" font-size="19" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Integration Service</text>
+  <text x="520" y="203" font-size="13" fill="#B8C7CD" text-anchor="middle">Python · asyncio</text>
+  <text x="520" y="222" font-size="13" fill="#B8C7CD" text-anchor="middle">backfill + checkpoints</text>
+
+  <!-- Arrow B -> C -->
+  <line x1="655" y1="190" x2="721" y2="190" stroke="#5C6B73" stroke-width="2.5"/>
+  <polygon points="729,190 718,184 718,196" fill="#5C6B73"/>
+  <text x="691" y="220" font-size="11.5" font-style="italic" fill="#5C6B73" text-anchor="middle">TS.ADD · HSET</text>
+  <text x="691" y="234" font-size="11.5" font-style="italic" fill="#5C6B73" text-anchor="middle">PUBLISH</text>
+
+  <!-- Box C: Redis -->
+  <rect x="730" y="130" width="270" height="120" rx="14" fill="#FF4438"/>
+  <text x="865" y="180" font-size="21" font-weight="bold" fill="#FFFFFF" text-anchor="middle">Redis</text>
+  <text x="865" y="210" font-size="13" fill="#FFE1DE" text-anchor="middle">TimeSeries · Hash · Pub/Sub</text>
+
+  <!-- connector down from Redis to outputs -->
+  <line x1="865" y1="250" x2="865" y2="300" stroke="#D8E0E3" stroke-width="2"/>
+  <line x1="156" y1="300" x2="865" y2="300" stroke="#D8E0E3" stroke-width="2"/>
+
+  <!-- Output chips -->
+  <g>
+    <rect x="40" y="320" width="232" height="96" rx="12" fill="#FFFFFF" stroke="#D8E0E3" stroke-width="1"/>
+    <text x="58" y="356" font-size="16" font-weight="bold" font-family="Courier New, monospace" fill="#FF4438">pi:ts:*</text>
+    <text x="58" y="383" font-size="12.5" fill="#163341">Full history</text>
+    <text x="58" y="401" font-size="12.5" fill="#163341">(RedisTimeSeries)</text>
+
+    <rect x="282" y="320" width="232" height="96" rx="12" fill="#FFFFFF" stroke="#D8E0E3" stroke-width="1"/>
+    <text x="300" y="356" font-size="16" font-weight="bold" font-family="Courier New, monospace" fill="#FF4438">pi:latest:*</text>
+    <text x="300" y="383" font-size="12.5" fill="#163341">Current value</text>
+    <text x="300" y="401" font-size="12.5" fill="#163341">snapshot (Hash)</text>
+
+    <rect x="524" y="320" width="232" height="96" rx="12" fill="#FFFFFF" stroke="#D8E0E3" stroke-width="1"/>
+    <text x="542" y="356" font-size="16" font-weight="bold" font-family="Courier New, monospace" fill="#FF4438">pi:checkpoint:*</text>
+    <text x="542" y="383" font-size="12.5" fill="#163341">Last-seen ts for</text>
+    <text x="542" y="401" font-size="12.5" fill="#163341">gap recovery</text>
+
+    <rect x="766" y="320" width="234" height="96" rx="12" fill="#FFFFFF" stroke="#D8E0E3" stroke-width="1"/>
+    <text x="784" y="356" font-size="16" font-weight="bold" font-family="Courier New, monospace" fill="#FF4438">pi:updates</text>
+    <text x="784" y="383" font-size="12.5" fill="#163341">Live feed</text>
+    <text x="784" y="401" font-size="12.5" fill="#163341">(Pub/Sub)</text>
+  </g>
+</svg>

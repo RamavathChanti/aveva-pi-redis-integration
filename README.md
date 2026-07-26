@@ -4,14 +4,10 @@ A small async service that polls the **AVEVA PI Web API** for time-series tag
 values and streams them into **Redis** — as RedisTimeSeries history, a
 current-value snapshot, and a pub/sub feed.
 
-```
- ┌────────────┐  streamset/     ┌────────────────────┐   RESP    ┌─────────────┐
- │  PI Web API│  recorded (1×)  │ integration service│ ─────────▶│    Redis    │
- │ (or mock)  │ ───────────────▶│  (Python, asyncio) │  TS.ADD   │ TimeSeries  │
- └────────────┘  batch backfill │  + checkpoints     │  HSET     │ + snapshot  │
-                                 │  + /healthz /metrics│  PUBLISH  │ + pub/sub   │
-                                 └────────────────────┘           └─────────────┘
-```
+![Architecture: AVEVA PI Web API → integration service → Redis](docs/architecture.png)
+
+> 📊 A customer-facing slide deck (with speaker notes) is in
+> [`demo/AVEVA-PI-Redis-Demo.pptx`](demo/AVEVA-PI-Redis-Demo.pptx).
 
 **Delivery model:** each cycle batch-reads *recorded* (archived) values for all
 tags in **one** streamset request, starting from each tag's **checkpoint** stored
@@ -106,6 +102,27 @@ past the POC.
 | `src/redis_writer.py`   | RedisTimeSeries + snapshot + pub/sub writer      |
 | `src/main.py`           | Poll loop + graceful shutdown                    |
 | `src/mock_pi_server.py` | Fake PI Web API for local testing                |
+
+## Why Redis in front of AVEVA PI
+
+Redis **complements** PI — it does not replace it. PI stays the system of record
+and the long-term compressed historian; Redis becomes the low-latency **serving
+and real-time layer** that applications talk to instead of hitting the historian
+directly. For serving operational data to modern apps, that changes a lot:
+
+| Dimension | Querying PI Web API directly | Serving via Redis |
+|-----------|------------------------------|-------------------|
+| **Read latency** | Per-request REST call | **Sub-millisecond**, in-memory |
+| **Concurrent app clients** | Limited — load lands on PI | **Thousands**, scaled via replicas |
+| **Real-time delivery** | Poll / channel subscriptions | Native **Pub/Sub & Streams** push |
+| **Data models** | Time-series (OT-specific) | **TimeSeries + JSON + Search + Vector** |
+| **Load on OT systems** | Every query taxes the historian | Apps hit Redis; **PI stays protected** |
+| **Scaling & deployment** | Vertical; OT-licensed | **Horizontal**, cloud-native, managed |
+
+**Net:** point your dashboards, alerting and ML feature lookups at Redis. They get
+speed and real-time push; your historian and PI licensing are shielded from app
+traffic; and the same store also does caching, JSON enrichment and vector search —
+so there's less infrastructure to run overall.
 
 ## Implemented
 
