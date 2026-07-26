@@ -1,0 +1,39 @@
+services:
+  redis:
+    image: redis/redis-stack:7.4.0-v0   # includes RedisTimeSeries + RedisInsight UI
+    ports:
+      - "6379:6379"
+      - "8001:8001"                      # RedisInsight web UI
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  mock-pi:
+    build: .
+    command: uvicorn mock_pi_server:app --host 0.0.0.0 --port 8080
+    ports:
+      - "8080:8080"
+
+  integration:
+    build: .
+    depends_on:
+      redis:
+        condition: service_healthy
+      mock-pi:
+        condition: service_started
+    environment:
+      PI_BASE_URL: http://mock-pi:8080/piwebapi
+      PI_AUTH_MODE: none
+      PI_POINTS: '\\PISRV01\Sinusoid,\\PISRV01\CDT158,\\PISRV01\SINUSOIDU'
+      POLL_INTERVAL_SECONDS: "5"
+      BACKFILL_START_MINUTES: "10"
+      RECORDED_MAX_COUNT: "1000"
+      HEALTH_PORT: "9100"
+      REDIS_URL: redis://redis:6379/0
+      REDIS_KEY_PREFIX: pi
+      REDIS_TS_RETENTION_MS: "604800000"
+    ports:
+      - "9100:9100"          # /healthz + /metrics
+    command: python main.py
