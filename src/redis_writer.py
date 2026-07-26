@@ -33,11 +33,33 @@ _tag_from_path = tag_from_path
 
 
 class RedisWriter:
-    def __init__(self, url: str, *, key_prefix: str = "pi", retention_ms: int = 0) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        key_prefix: str = "pi",
+        retention_ms: int = 0,
+        downsample_enabled: bool = True,
+        downsample_bucket_ms: int = 60_000,
+        downsample_aggregation: str = "avg",
+    ) -> None:
         self._redis = aioredis.from_url(url, decode_responses=True)
         self._prefix = key_prefix
         self._retention_ms = retention_ms
+        self._ds_enabled = downsample_enabled
+        self._ds_bucket_ms = downsample_bucket_ms
+        self._ds_agg = downsample_aggregation.lower()
         self._ensured: set[str] = set()
+
+    def _rollup_label(self) -> str:
+        """Human label for the rollup, e.g. avg_1m for a 60000 ms avg bucket."""
+        ms = self._ds_bucket_ms
+        unit = "ms"
+        for size, u in ((3_600_000, "h"), (60_000, "m"), (1_000, "s")):
+            if ms % size == 0:
+                ms, unit = ms // size, u
+                break
+        return f"{self._ds_agg}_{ms}{unit}"
 
     async def aclose(self) -> None:
         await self._redis.aclose()
@@ -47,6 +69,9 @@ class RedisWriter:
 
     def _ts_key(self, tag: str) -> str:
         return f"{self._prefix}:ts:{tag}"
+
+    def _rollup_key(self, tag: str) -> str:
+        return f"{self._prefix}:ts:{tag}:{self._rollup_label()}"
 
     def _latest_key(self, tag: str) -> str:
         return f"{self._prefix}:latest:{tag}"
@@ -77,7 +102,38 @@ class RedisWriter:
         except ResponseError as e:
             if "already exists" not in str(e).lower():
                 raise
+
+        if self._ds_enabled:
+            await self._ensure_rollup(tag, path, key)
         self._ensured.add(tag)
+
+    async def _ensure_rollup(self, tag: str, path: str, src_key: str) -> None:
+        """Create a downsampled series + TS.CREATERULE compaction on the source.
+
+        Every `bucket_ms` window of raw samples is aggregated (e.g. avg) into the
+        rollup series automatically by RedisTimeSeries — cheap long-range queries.
+        """
+        rollup = self._rollup_label()
+        dst_key = self._rollup_key(tag)
+        try:
+            await self._redis.execute_command(
+                "TS.CREATE", dst_key,
+                "RETENTION", self._retention_ms,
+                "LABELS", "source", "pi", "tag", tag, "path", path, "rollup", rollup,
+            )
+        except ResponseError as e:
+            if "already exists" not in str(e).lower():
+                raise
+        try:
+            await self._redis.execute_command(
+                "TS.CREATERULE", src_key, dst_key,
+                "AGGREGATION", self._ds_agg, self._ds_bucket_ms,
+            )
+            log.info("created rollup %s (%s / %dms)", dst_key, self._ds_agg, self._ds_bucket_ms)
+        except ResponseError as e:
+            # Rule already exists between these keys — fine on restart.
+            if "already" not in str(e).lower():
+                raise
 
     async def write(self, sample: PIValue, ts_ms: int) -> None:
         """Persist one sample. ts_ms is the sample time in epoch milliseconds."""

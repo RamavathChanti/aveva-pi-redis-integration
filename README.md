@@ -45,6 +45,10 @@ docker compose exec redis redis-cli TS.RANGE pi:ts:Sinusoid - + COUNT 5
 # all PI series at once, by label
 docker compose exec redis redis-cli TS.MRANGE - + FILTER source=pi
 
+# downsampled rollup (auto-maintained 1-min avg via TS.CREATERULE)
+docker compose exec redis redis-cli TS.RANGE pi:ts:Sinusoid:avg_1m - + COUNT 5
+docker compose exec redis redis-cli TS.MRANGE - + FILTER rollup=avg_1m
+
 # watch the live feed
 docker compose exec redis redis-cli SUBSCRIBE pi:updates
 ```
@@ -56,7 +60,15 @@ curl http://localhost:9100/healthz    # {"status":"ok"} / 503 while degraded
 curl http://localhost:9100/metrics    # Prometheus: samples_written, poll_errors, pi_up, ...
 ```
 
-RedisInsight UI (browse the TimeSeries visually): http://localhost:8001
+**See the commands live during a demo.** Run a profiler in a spare terminal so the
+audience watches every command the service issues, in real time:
+
+```bash
+docker compose exec redis redis-cli MONITOR
+```
+
+RedisInsight UI (browse the TimeSeries visually + built-in **Profiler**, which is
+`MONITOR` in the UI): http://localhost:8001
 
 ## Run locally without Docker
 
@@ -133,11 +145,13 @@ so there's less infrastructure to run overall.
   resume from the checkpoint and backfill the gap. Deduped via `TS.ADD ON_DUPLICATE LAST`.
 - **Observability** — `/healthz` and Prometheus `/metrics` (samples written, poll
   errors, `pi_up`, resolved-point count).
+- **Downsampling** — per tag, a `TS.CREATERULE` compaction auto-maintains a rollup
+  series (`pi:ts:<tag>:avg_1m` by default) for cheap long-range queries. Configurable
+  bucket + aggregation via `DOWNSAMPLE_*`.
 
 ## Still POC → production
 
 - **Auth:** Kerberos/SPNEGO for a real PI Web API (add to `PIWebAPIClient.__init__`);
   ACL/TLS + `requirepass` for Redis.
 - **Scale:** shard tags across workers; tune `RECORDED_MAX_COUNT` and poll interval.
-- **Downsampling:** RedisTimeSeries compaction rules (`TS.CREATERULE`) for rollups.
 - **Alerting:** wire `/metrics` into Prometheus + Alertmanager (stale `pi_last_poll_unixtime`, rising `pi_poll_errors_total`).

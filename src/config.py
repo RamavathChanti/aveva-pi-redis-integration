@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     redis_key_prefix: str = "pi"
     redis_ts_retention_ms: int = 604_800_000
 
+    # Downsampling: auto-create a TS.CREATERULE rollup per tag (e.g. 1-min avg).
+    downsample_enabled: bool = True
+    downsample_bucket_ms: int = 60_000
+    downsample_aggregation: str = "avg"  # avg | min | max | sum | count | ...
+
     @property
     def points(self) -> list[str]:
         return [p.strip() for p in self.pi_points.split(",") if p.strip()]

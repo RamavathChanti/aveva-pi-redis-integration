@@ -118,6 +118,9 @@ async def main() -> None:
         settings.redis_url,
         key_prefix=settings.redis_key_prefix,
         retention_ms=settings.redis_ts_retention_ms,
+        downsample_enabled=settings.downsample_enabled,
+        downsample_bucket_ms=settings.downsample_bucket_ms,
+        downsample_aggregation=settings.downsample_aggregation,
     )
 
     stop = asyncio.Event()

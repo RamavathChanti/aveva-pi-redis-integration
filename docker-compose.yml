@@ -34,6 +34,9 @@ services:
       REDIS_URL: redis://redis:6379/0
       REDIS_KEY_PREFIX: pi
       REDIS_TS_RETENTION_MS: "604800000"
+      DOWNSAMPLE_ENABLED: "true"
+      DOWNSAMPLE_BUCKET_MS: "60000"
+      DOWNSAMPLE_AGGREGATION: avg
     ports:
       - "9100:9100"          # /healthz + /metrics
     command: python main.py
