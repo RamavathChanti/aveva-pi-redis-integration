@@ -74,6 +74,28 @@ def _now() -> datetime:
 def _parse_pi_time(value: str) -> datetime:
     if value in ("*", "", None):
         return _now()
+    if value.startswith("*-"):
+        suffix = value[2:].lower().strip()
+        if suffix.endswith("m"):
+            try:
+                return _now() - timedelta(minutes=float(suffix[:-1]))
+            except ValueError:
+                pass
+        elif suffix.endswith("h"):
+            try:
+                return _now() - timedelta(hours=float(suffix[:-1]))
+            except ValueError:
+                pass
+        elif suffix.endswith("d"):
+            try:
+                return _now() - timedelta(days=float(suffix[:-1]))
+            except ValueError:
+                pass
+        elif suffix.endswith("s"):
+            try:
+                return _now() - timedelta(seconds=float(suffix[:-1]))
+            except ValueError:
+                pass
     cleaned = value.replace("Z", "+00:00")
     parsed = datetime.fromisoformat(cleaned)
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
